@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,9 +24,11 @@ type card struct {
 	playable bool
 }
 type hand struct {
-	health int
-	power  int
-	cards  []card
+	health        int
+	power         int
+	selectedCard  int
+	selectedPower int
+	cards         []card
 }
 
 func initHand() hand {
@@ -32,6 +36,7 @@ func initHand() hand {
 	var tmpCard card
 	tmpHand.health = maxHealth
 	tmpHand.power = maxPower
+	tmpHand.selectedCard = -1
 	tmpHand.cards = make([]card, handSize)
 	for i := range tmpHand.cards {
 		tmpCard.name = "Card " + strconv.Itoa(i)
@@ -44,26 +49,141 @@ func initHand() hand {
 }
 
 func drawHand(hand hand) {
-	fmt.Println("--------------------------")
-	stringHand := "| \033[34m" + strconv.Itoa(hand.health) + "\033[0m |"
+	fmt.Println("┌────┬" + strings.Repeat("─", 15) + "┬────┐")
+	fmt.Printf("│\033[34m%3d\033[0m │", hand.health)
 	for _, v := range hand.cards {
 		if v.playable {
-			stringHand += "  \033[32m" + strconv.Itoa(v.value) + "\033[0m"
+			fmt.Printf("\033[32m%2d\033[0m │", v.value)
 		} else {
-			stringHand += "  " + strconv.Itoa(v.value)
+			fmt.Printf("\033[37m%2d\033[0m │", v.value)
 		}
 
 	}
-	stringHand += "  | \033[31m" + strconv.Itoa(hand.power) + "\033[0m |"
-	fmt.Println(stringHand)
-	fmt.Println("--------------------------")
+	fmt.Printf("\033[31m%3d\033[0m │\n", hand.power)
+	fmt.Println("└────┴" + strings.Repeat("─", 15) + "┴────┘")
+}
+
+func clearScreen() {
+	cmd := exec.Command("cmd", "/c", "cls")
+	cmd.Stdout = os.Stdout
+	cmd.Run()
 }
 
 func drawTable(firstHand hand, secondHand hand) {
+	//clearScreen()
+	fmt.Print("\033[H\033[2J")
+
 	drawHand(firstHand)
-	fmt.Println("++++++++++++++++++++++++++")
+
+	fmt.Println("╔" + strings.Repeat("═", 25) + "╗")
+	fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+
+	if firstHand.selectedCard != -1 {
+		fmt.Printf("║\033[32m%4d\033[0m+\033[31m%-20d\033[0m║\n", firstHand.cards[firstHand.selectedCard].value, firstHand.selectedPower)
+	} else {
+		fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+	}
+
+	fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+
+	if secondHand.selectedCard != -1 {
+
+		fmt.Printf("║\033[32m%20d\033[0m+\033[31m%-4d\033[0m║\n", secondHand.cards[secondHand.selectedCard].value, secondHand.selectedPower)
+
+		//selectedCards += "\033[32m" + strconv.Itoa(secondHand.cards[secondHand.selectedCard].value) + "\033[0m+"
+		//selectedCards += "\033[31m" + strconv.Itoa(secondHand.selectedPower) + "\033[0m    ++"
+	} else {
+		fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+	}
+
+	fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+	fmt.Println("╚" + strings.Repeat("═", 25) + "╝")
+
 	drawHand(secondHand)
 
+}
+
+func drawBattle(firstHand hand, secondHand hand) {
+
+	compTotalPower := firstHand.cards[firstHand.selectedCard].value + firstHand.selectedPower
+	userTotalPower := secondHand.cards[secondHand.selectedCard].value + secondHand.selectedPower
+
+	fmt.Print("\033[H\033[2J")
+
+	drawHand(firstHand)
+
+	fmt.Println("╔" + strings.Repeat("═", 25) + "╗")
+	fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+	fmt.Printf("║\033[32m%11d\033[0m vs \033[32m%-10d\033[0m║\n", compTotalPower, userTotalPower)
+	if userTotalPower > compTotalPower {
+		fmt.Println("║" + strings.Repeat(" ", 8) + "\033[32mUSER WINS\033[0m" + strings.Repeat(" ", 8) + "║")
+		fmt.Printf("║"+strings.Repeat(" ", 8)+"\033[32mDAMAGE:%3d\033[0m"+strings.Repeat(" ", 7)+"║\n", userTotalPower-compTotalPower)
+	} else if userTotalPower < compTotalPower {
+		fmt.Println("║" + strings.Repeat(" ", 8) + "\033[31mCOMP WINS\033[0m" + strings.Repeat(" ", 8) + "║")
+		fmt.Printf("║"+strings.Repeat(" ", 8)+"\033[31mDAMAGE:%3d\033[0m"+strings.Repeat(" ", 7)+"║\n", compTotalPower-userTotalPower)
+	} else {
+		fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+		fmt.Println("║" + strings.Repeat(" ", 11) + "\033[31mDRAW\033[0m" + strings.Repeat(" ", 10) + "║")
+	}
+
+	fmt.Println("║" + strings.Repeat(" ", 25) + "║")
+	fmt.Println("╚" + strings.Repeat("═", 25) + "╝")
+
+	drawHand(secondHand)
+
+}
+
+func processUserTurn(userHand hand) hand {
+	var cardNumber, cardPower int
+	var err error
+
+	scanner := bufio.NewScanner(os.Stdin)
+
+	userHand.selectedCard = -1
+	for {
+		fmt.Print("Enter card number: ")
+		scanner.Scan()
+		cardNumber, err = strconv.Atoi(scanner.Text())
+		if err != nil {
+			fmt.Println("Unrecognized character")
+			continue
+		} else {
+			if cardNumber > handSize || cardNumber < 1 {
+				fmt.Println("Card number is too big. Card number range is 1 ..", handSize)
+				continue
+			}
+			if !userHand.cards[cardNumber-1].playable {
+				fmt.Println("Card already played. Please choose another")
+				continue
+			}
+		}
+		userHand.cards[cardNumber-1].playable = false
+		userHand.selectedCard = cardNumber - 1
+		break
+	}
+	fmt.Print("Enter power: ")
+	scanner.Scan()
+	cardPower, err = strconv.Atoi(scanner.Text())
+	userHand.selectedPower = cardPower
+	userHand.power -= cardPower
+	return userHand
+}
+
+func processCompTurn(compHand hand) hand {
+	var cardNumber, cardPower int
+	compHand.selectedCard = -1
+	for {
+		cardNumber = rand.Intn(handSize)
+		if compHand.cards[cardNumber].playable {
+			break
+		}
+	}
+	cardPower = rand.Intn(compHand.power + 1)
+	compHand.cards[cardNumber].playable = false
+	compHand.selectedCard = cardNumber
+	compHand.selectedPower = cardPower
+	compHand.power -= cardPower
+	return compHand
 }
 
 func main() {
@@ -75,46 +195,40 @@ func main() {
 
 	//Bool value to select current player
 	isUserTurn := rand.Intn(2) == 0
-	isTableDirty := true
-
-	scanner := bufio.NewScanner(os.Stdin)
-
-	var cardNumber, cardPower int
-	var err error
+	//isTableDirty := true
+	var totalUserPower, totalCompPower, totalUserDamage int
+	//var cardNumber, cardPower int
+	//var err error
 
 	for {
-		if isTableDirty {
-			drawTable(userHand, compHand)
-		}
-		isTableDirty = !isTableDirty
+		userHand.selectedCard = -1
+		compHand.selectedCard = -1
+		drawTable(compHand, userHand)
 		if isUserTurn {
-			for {
-				fmt.Println("Enter card number: ")
-				scanner.Scan()
-				cardNumber, err = strconv.Atoi(scanner.Text())
-				if err != nil {
-					fmt.Println("Unrecognized character")
-					continue
-				} else {
-					if cardNumber > handSize || cardNumber < 1 {
-						fmt.Println("Card number is too big. Card number range is 1 ..", handSize)
-						continue
-					}
-					if !userHand.cards[cardNumber-1].playable {
-						fmt.Println("Card already played. Please choose another")
-						continue
-					}
-				}
-				userHand.cards[cardNumber-1].playable = false
-				break
-			}
-			fmt.Println("Enter power: ")
-			scanner.Scan()
-			cardPower, err = strconv.Atoi(scanner.Text())
-			fmt.Printf("Playing card %d with power %d\n", cardNumber, cardPower)
+			fmt.Println("USER TURN")
+			userHand = processUserTurn(userHand)
+			drawTable(compHand, userHand)
+			compHand = processCompTurn(compHand)
 		} else {
-			fmt.Println("My turn!")
+			fmt.Println("COMP TURN")
+			compHand = processCompTurn(compHand)
+			drawTable(compHand, userHand)
+			userHand = processUserTurn(userHand)
 		}
+		drawTable(compHand, userHand)
+		fmt.Print("Press 'Enter' for the turn results...")
+		bufio.NewReader(os.Stdin).ReadBytes('\n')
+		drawBattle(compHand, userHand)
+		totalUserPower = userHand.cards[userHand.selectedCard].value + userHand.selectedPower
+		totalCompPower = compHand.cards[compHand.selectedCard].value + compHand.selectedPower
+		totalUserDamage = totalUserPower - totalCompPower
+		if totalUserDamage > 0 {
+			compHand.health -= totalUserDamage
+		} else {
+			userHand.health += totalUserDamage
+		}
+		fmt.Print("Press 'Enter' for the next turn...")
+		bufio.NewReader(os.Stdin).ReadBytes('\n')
 		isUserTurn = !isUserTurn
 	}
 	//Loop User Hand
