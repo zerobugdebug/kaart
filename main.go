@@ -50,7 +50,7 @@ func initHand() hand {
 
 func drawHand(hand hand) {
 	fmt.Println("┌────┬" + strings.Repeat("─", 15) + "┬────┐")
-	fmt.Printf("│\033[34m%3d\033[0m │", hand.health)
+	fmt.Printf("│\033[34;1m%3d\033[0m │", hand.health)
 	for _, v := range hand.cards {
 		if v.playable {
 			fmt.Printf("\033[32m%2d\033[0m │", v.value)
@@ -149,7 +149,7 @@ func processUserTurn(userHand hand) hand {
 			continue
 		} else {
 			if cardNumber > handSize || cardNumber < 1 {
-				fmt.Println("Card number is too big. Card number range is 1 ..", handSize)
+				fmt.Println("Incorrect card number. Card number range is 1 ..", handSize)
 				continue
 			}
 			if !userHand.cards[cardNumber-1].playable {
@@ -161,9 +161,25 @@ func processUserTurn(userHand hand) hand {
 		userHand.selectedCard = cardNumber - 1
 		break
 	}
-	fmt.Print("Enter power: ")
-	scanner.Scan()
-	cardPower, err = strconv.Atoi(scanner.Text())
+	if userHand.power > 0 {
+		for {
+			fmt.Print("Enter power: ")
+			scanner.Scan()
+			cardPower, err = strconv.Atoi(scanner.Text())
+			if err != nil {
+				fmt.Println("Unrecognized character")
+				continue
+			} else {
+				if cardPower > userHand.power || cardPower < 0 {
+					fmt.Println("Incorrect power value. Power value range is 0 ..", userHand.power)
+					continue
+				}
+			}
+			break
+		}
+	} else {
+		cardPower = 0
+	}
 	userHand.selectedPower = cardPower
 	userHand.power -= cardPower
 	return userHand
@@ -200,7 +216,7 @@ func main() {
 	//var cardNumber, cardPower int
 	//var err error
 
-	for {
+	for i := 0; i < handSize; i++ {
 		userHand.selectedCard = -1
 		compHand.selectedCard = -1
 		drawTable(compHand, userHand)
@@ -227,9 +243,29 @@ func main() {
 		} else {
 			userHand.health += totalUserDamage
 		}
-		fmt.Print("Press 'Enter' for the next turn...")
-		bufio.NewReader(os.Stdin).ReadBytes('\n')
+
+		if userHand.health < 1 || compHand.health < 1 {
+			break
+		}
+		if i < handSize-1 {
+			fmt.Print("Press 'Enter' for the next turn...")
+			bufio.NewReader(os.Stdin).ReadBytes('\n')
+		}
+
 		isUserTurn = !isUserTurn
+	}
+
+	fmt.Print("Press 'Enter' for the game results...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
+	userHand.selectedCard = -1
+	compHand.selectedCard = -1
+	drawTable(compHand, userHand)
+	if userHand.health == compHand.health {
+		fmt.Print("DRAW")
+	} else if userHand.health < compHand.health {
+		fmt.Print("COMP WINS")
+	} else {
+		fmt.Print("USER WINS")
 	}
 	//Loop User Hand
 	//askForCard()
