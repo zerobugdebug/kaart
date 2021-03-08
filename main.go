@@ -74,7 +74,8 @@ func main() {
 	compHand := initHand()
 
 	//Bool value to select current player
-	currentPlayer := rand.Intn(2) == 0
+	isUserTurn := rand.Intn(2) == 0
+	isTableDirty := true
 
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -82,8 +83,11 @@ func main() {
 	var err error
 
 	for {
-		drawTable(userHand, compHand)
-		if currentPlayer {
+		if isTableDirty {
+			drawTable(userHand, compHand)
+		}
+		isTableDirty = !isTableDirty
+		if isUserTurn {
 			for {
 				fmt.Println("Enter card number: ")
 				scanner.Scan()
@@ -111,7 +115,7 @@ func main() {
 		} else {
 			fmt.Println("My turn!")
 		}
-		currentPlayer = !currentPlayer
+		isUserTurn = !isUserTurn
 	}
 	//Loop User Hand
 	//askForCard()
