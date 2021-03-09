@@ -9,11 +9,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/zerobugdebug/go-log"
 )
 
 const (
-	handSize  int = 4
-	maxPower  int = 12
+	//HandSize is amount of cards every player should have
+	HandSize int = 4
+	//MaxPower is the maximum power available to the player
+	MaxPower  int = 12
 	maxHealth int = 12
 	maxRank   int = 9
 )
@@ -31,13 +35,16 @@ type hand struct {
 	cards         []card
 }
 
+//Logger is a default log adapter
+var Logger = log.New(os.Stdout).WithDebug()
+
 func initHand() hand {
 	var tmpHand hand
 	var tmpCard card
 	tmpHand.health = maxHealth
-	tmpHand.power = maxPower
+	tmpHand.power = MaxPower
 	tmpHand.selectedCard = -1
-	tmpHand.cards = make([]card, handSize)
+	tmpHand.cards = make([]card, HandSize)
 	for i := range tmpHand.cards {
 		tmpCard.name = "Card " + strconv.Itoa(i)
 		tmpCard.playable = true
@@ -148,8 +155,8 @@ func processUserTurn(userHand hand) hand {
 			fmt.Println("Unrecognized character")
 			continue
 		} else {
-			if cardNumber > handSize || cardNumber < 1 {
-				fmt.Println("Incorrect card number. Card number range is 1 ..", handSize)
+			if cardNumber > HandSize || cardNumber < 1 {
+				fmt.Println("Incorrect card number. Card number range is 1 ..", HandSize)
 				continue
 			}
 			if !userHand.cards[cardNumber-1].playable {
@@ -189,7 +196,7 @@ func processCompTurn(compHand hand) hand {
 	var cardNumber, cardPower int
 	compHand.selectedCard = -1
 	for {
-		cardNumber = rand.Intn(handSize)
+		cardNumber = rand.Intn(HandSize)
 		if compHand.cards[cardNumber].playable {
 			break
 		}
@@ -209,6 +216,8 @@ func main() {
 	userHand := initHand()
 	compHand := initHand()
 
+	GeneratePopulation()
+	Logger.Fatal()
 	//Bool value to select current player
 	isUserTurn := rand.Intn(2) == 0
 	//isTableDirty := true
@@ -216,7 +225,7 @@ func main() {
 	//var cardNumber, cardPower int
 	//var err error
 
-	for i := 0; i < handSize; i++ {
+	for i := 0; i < HandSize; i++ {
 		userHand.selectedCard = -1
 		compHand.selectedCard = -1
 		drawTable(compHand, userHand)
@@ -247,7 +256,7 @@ func main() {
 		if userHand.health < 1 || compHand.health < 1 {
 			break
 		}
-		if i < handSize-1 {
+		if i < HandSize-1 {
 			fmt.Print("Press 'Enter' for the next turn...")
 			bufio.NewReader(os.Stdin).ReadBytes('\n')
 		}
