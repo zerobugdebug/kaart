@@ -1,14 +1,17 @@
 package main
 
 import (
+	"fmt"
+	"hash/fnv"
 	"math"
-	"math/bits"
 	"math/rand"
+	"sort"
+	"time"
 )
 
 //Genetic algorithm parameters
 var (
-	populationSize         int     = 10    //size of the population
+	maxPopulationSize      int     = 100   //size of the population
 	generationsLimit       int     = 2     //how many generations to generate
 	crossoverRate          float32 = 0.9   //how often to do crossover 0%-100% in decimal
 	mutationRate           float32 = 0.9   //how often to do mutation 0%-100% in decimal
@@ -27,18 +30,25 @@ const (
 	//maxPower   int = 12
 )
 
+//Gene represents one gene in the chromosome
+type gene struct {
+	order int
+	power int
+}
+
 //Chromosome is the type for the chromosome
-type Chromosome struct {
-	genes   uint64
+type chromosome struct {
+	genes   []gene
 	fitness float32
 }
 
 //Population is a struct for the chromosomes and their hashes
-type Population struct {
+type population struct {
 	hashes      map[uint64]int
-	Chromosomes []Chromosome
+	chromosomes []chromosome
 }
 
+/*
 //Packing slice of bytes to uint64 using the minimum amount of bits
 func packBytes(unpacked []byte) uint64 {
 	var packed uint64
@@ -48,66 +58,110 @@ func packBytes(unpacked []byte) uint64 {
 	}
 	return packed
 }
+*/
 
-/*
-func calcGenesHash(genes uint16) uint64 {
+func calcGenesHash(genes []gene) uint64 {
+
+	//Convert slice into string representation
+	allGenes := fmt.Sprint(genes)
+	Logger.Debug("allGenes=", allGenes)
+
 	//Calculate hash
 	hashAlg := fnv.New64a()
-	bytes:= make([]byte, 4)
-	binary.BigEndian.PutUint16(bytes, genes)
-	hashAlg.Write(bytes)
+	hashAlg.Write([]byte(allGenes))
 	return hashAlg.Sum64()
 }
 
 //Calculate hash for the chromosome
-func calcChromosomeHash(chromosome Chromosome) uint64 {
+func calcChromosomeHash(chromosome chromosome) uint64 {
 	return calcGenesHash(chromosome.genes)
 }
 
 //Calculate hash for the chromosomes
-func calcChromosomesHash(chromosomes []Chromosome) map[uint64]int {
+func calcChromosomesHash(chromosomes []chromosome) map[uint64]int {
 	hashMap := make(map[uint64]int)
 	for i, v := range chromosomes {
 		hashMap[calcChromosomeHash(v)] = i
 	}
 	return hashMap
-} */
+}
 
 //GenerateChromosome will generate a new chromosome for the GA
-func GenerateChromosome() Chromosome {
-	var newChromosome Chromosome
-	cardsOrder := rand.Perm(HandSize)[:HandSize-1]
+func generateChromosome(hand Hand) chromosome {
+	var newChromosome chromosome
+	var lenHand int
+	for _, v := range hand.cards {
+		if v.playable {
+			lenHand++
+		}
+	}
+
+	cardsOrder := rand.Perm(lenHand)
 	var cardsPower []int
-	cardsPower = make([]int, HandSize-1)
+	cardsPower = make([]int, lenHand)
 	totalPower := 0
 	for i := range cardsPower {
-		cardsPower[i] = rand.Intn(MaxPower - totalPower + 1)
+		cardsPower[i] = rand.Intn(hand.power - totalPower + 1)
 		totalPower += cardsPower[i]
 	}
 	Logger.Debug(cardsOrder)
 	Logger.Debug(cardsPower)
-	unpackedBytes := make([]byte, HandSize*(HandSize-1))
-	bitSize := bits.Len(uint(MaxPower))
-	for i, v := range cardsOrder {
-		unpackedBytes[i*bitSize+v] = byte(cardsPower[i])
+	//Convert relative cardOrder to absolute
+	cardsOrder = convertCardOrder(cardsOrder, hand)
+	Logger.Debug(cardsOrder)
+
+	//Filling up genes
+	newChromosome.genes = make([]gene, lenHand)
+	for i := range newChromosome.genes {
+		newChromosome.genes[i].order = cardsOrder[i]
+		newChromosome.genes[i].power = cardsPower[i]
 	}
-	Logger.Debug(unpackedBytes)
-	newChromosome.genes = packBytes(unpackedBytes)
 	Logger.Debug(newChromosome)
 	return newChromosome
 }
 
 //GeneratePopulation will generate full population
-func GeneratePopulation() Population {
-	var population Population
-	var chromosome Chromosome
-	remainingChromosomesNumber := populationSize
+func generatePopulation(hand Hand) population {
+	var population population
+	var chromosome chromosome
+	var remainingChromosomesNumber, numPlayableCards, maxAvailableVariants int
+
+	remainingChromosomesNumber = maxPopulationSize
+	//Calculate maximum number of permutations
+	for _, v := range hand.cards {
+		if v.playable {
+			numPlayableCards++
+		}
+	}
+	//Generate temp slice to store card order numbers
+	tempSlice := make([]int, numPlayableCards)
+	for i := range tempSlice {
+		tempSlice[i] = i
+	}
+	//Get the number of all possible orders of the cards for the specific amount of cards
+	maxAvailableVariants = len(GetAllPermutations(tempSlice))
+	Logger.Debug("maxAvailableVariants=", maxAvailableVariants)
+	//Check to see if only card order variants emough to cover maxPopulationSize
+	if maxAvailableVariants < maxPopulationSize {
+		//Calculate number of possible combinations to get to the available hand.power and multiple it to the card order variants
+		maxAvailableVariants *= len(GetAllPermutationsForSum(numPlayableCards, hand.power))
+	}
+	Logger.Debug("maxAvailableVariants=", maxAvailableVariants)
+	//Select the min(maxAvailableVariants, maxPopulationSize) as remainingChromosomesNumber
+	if maxAvailableVariants < maxPopulationSize {
+		remainingChromosomesNumber = maxAvailableVariants
+	}
+	Logger.Debug("remainingChromosomesNumber=", remainingChromosomesNumber)
+
 	population.hashes = make(map[uint64]int)
 	for condition := true; condition; condition = remainingChromosomesNumber > 0 {
-		chromosome = GenerateChromosome()
-		if _, ok := population.hashes[chromosome.genes]; !ok {
-			population.hashes[chromosome.genes] = len(population.Chromosomes)
-			population.Chromosomes = append(population.Chromosomes, chromosome)
+		chromosome = generateChromosome(hand)
+		Logger.Debug(chromosome)
+		hash := calcChromosomeHash(chromosome)
+		Logger.Debug(hash)
+		if _, ok := population.hashes[hash]; !ok {
+			population.hashes[hash] = len(population.chromosomes)
+			population.chromosomes = append(population.chromosomes, chromosome)
 			remainingChromosomesNumber--
 		}
 	}
@@ -115,25 +169,26 @@ func GeneratePopulation() Population {
 	return population
 }
 
-func copyChromosome(oldChromosome Chromosome) Chromosome {
-	var newChromosome Chromosome
-	newChromosome.genes = oldChromosome.genes
+func copyChromosome(oldChromosome chromosome) chromosome {
+	var newChromosome chromosome
+	newChromosome.genes = make([]gene, len(oldChromosome.genes))
+	copy(newChromosome.genes, oldChromosome.genes)
 	newChromosome.fitness = oldChromosome.fitness
 	return newChromosome
 }
 
-func copyChromosomes(oldChromosomes []Chromosome) []Chromosome {
-	var newChromosomes []Chromosome
+func copyChromosomes(oldChromosomes []chromosome) []chromosome {
+	var newChromosomes []chromosome
 	for _, v := range oldChromosomes {
 		newChromosomes = append(newChromosomes, copyChromosome(v))
 	}
 	return newChromosomes
 }
 
-func copyPopulation(oldPopulation Population) Population {
-	var newPopulation Population
+func copyPopulation(oldPopulation population) population {
+	var newPopulation population
 	//Copy chromosomes
-	newPopulation.Chromosomes = copyChromosomes(oldPopulation.Chromosomes)
+	newPopulation.chromosomes = copyChromosomes(oldPopulation.chromosomes)
 
 	//Copy hashes
 	newPopulation.hashes = make(map[uint64]int)
@@ -144,28 +199,28 @@ func copyPopulation(oldPopulation Population) Population {
 }
 
 //TransmogrifyPopulation will apply crossovers and mutations on non-elite Chromosomes
-func transmogrifyPopulation(pop Population) Population {
-	elitesNum := int(elitismRate * float32(len(pop.Chromosomes)))
+func transmogrifyPopulation(pop population) population {
+	elitesNum := int(elitismRate * float32(len(pop.chromosomes)))
 	//Logger.Info("elitesNum=", elitesNum)
-	var newPopulation Population
-	var tempChromosomes []Chromosome
+	var newPopulation population
+	var tempChromosomes []chromosome
 	//Keep elites in the new population
 	//	newPopulation = population[:elitesNum]
 	//Logger.Info("OldElite=", population[0])
-	newPopulation.Chromosomes = copyChromosomes(pop.Chromosomes[:elitesNum])
+	newPopulation.chromosomes = copyChromosomes(pop.chromosomes[:elitesNum])
 	//Recalculate hash for the elites
 	//newPopulation.hashes = calcChromosomesHash(newPopulation.Chromosomes)
 	//Logger.Info("NewElite=", newPopulation[0])
-	Logger.Debug("newPopulation size with elites =", len(newPopulation.Chromosomes))
-	Logger.Debug("Best elite fitness =", newPopulation.Chromosomes[0].fitness)
+	Logger.Debug("newPopulation size with elites =", len(newPopulation.chromosomes))
+	Logger.Debug("Best elite fitness =", newPopulation.chromosomes[0].fitness)
 	//LoggerFile.Info("ELITES:", newPopulation[0].tasks)
-	remainingChromosomesNumber := len(pop.Chromosomes) - elitesNum
+	remainingChromosomesNumber := len(pop.chromosomes) - elitesNum
 	Logger.Debug("remainingChromosomesNumber =", remainingChromosomesNumber)
 	//Generate len(population)-elitesNum additonal Chromosomes
 	for condition := true; condition; condition = remainingChromosomesNumber > 0 {
-		tempChromosomes = make([]Chromosome, crossoverParentsNumber)
+		tempChromosomes = make([]chromosome, crossoverParentsNumber)
 		//Select crossoverParentsNumber from the population with Torunament Selection
-		tempChromosomes = tourneySelect(pop.Chromosomes, crossoverParentsNumber)
+		tempChromosomes = tourneySelect(pop.chromosomes, crossoverParentsNumber)
 		Logger.Debug("tempPopulation size after tourney =", len(tempChromosomes))
 		//Apply crossover to the tempPopulation
 		//             tempChromosomes = crossoverChromosomesOX1(tempChromosomes)
@@ -175,18 +230,18 @@ func transmogrifyPopulation(pop Population) Population {
 		Logger.Debug("tempPopulation size after mutation =", len(tempChromosomes))
 		//Append tempPopulation to the new population, if indviduals are new
 		for _, v := range tempChromosomes {
-			//tempHash := calcChromosomeHash(v)
+			tempHash := calcChromosomeHash(v)
 			//If hash doesn't exist in the hashes map
-			if _, ok := newPopulation.hashes[v.genes]; !ok {
+			if _, ok := newPopulation.hashes[tempHash]; !ok {
 				//Add hash with value of index of current Chromosome
-				newPopulation.hashes[v.genes] = len(newPopulation.Chromosomes)
+				newPopulation.hashes[tempHash] = len(newPopulation.chromosomes)
 				//Add Chromosome to the Chromosomes slice
-				newPopulation.Chromosomes = append(newPopulation.Chromosomes, copyChromosome(v))
+				newPopulation.chromosomes = append(newPopulation.chromosomes, copyChromosome(v))
 				remainingChromosomesNumber--
 			}
 		}
 
-		Logger.Debug("newPopulation size =", len(newPopulation.Chromosomes))
+		Logger.Debug("newPopulation size =", len(newPopulation.chromosomes))
 		//Update remaining number of Chromosomes to generate
 		Logger.Debug("remainingChromosomesNumber =", remainingChromosomesNumber)
 		Logger.Debug("condition =", condition)
@@ -194,18 +249,18 @@ func transmogrifyPopulation(pop Population) Population {
 
 	Logger.Debug("newPopulation.hashes=", newPopulation.hashes)
 	//Cut extra Chromosomes generated by mutation/crossover
-	newPopulation.Chromosomes = newPopulation.Chromosomes[:len(pop.Chromosomes)]
+	newPopulation.chromosomes = newPopulation.chromosomes[:len(pop.chromosomes)]
 	return newPopulation
 
 }
 
 //Tournament selection for the crossover
-func tourneySelect(chromosomes []Chromosome, number int) []Chromosome {
+func tourneySelect(chromosomes []chromosome, number int) []chromosome {
 	//Create slice of randmoly permutated Chromosomes numbers
 	sampleOrder := rand.Perm(len(chromosomes))
 	Logger.Debug("sampleOrder =", sampleOrder)
 
-	var bestChromosomes []Chromosome
+	var bestChromosomes []chromosome
 	var bestChromosomeNumber int
 	var sampleOrderNumber int
 	var bestChromosomeFitness float32
@@ -244,7 +299,7 @@ func tourneySelect(chromosomes []Chromosome, number int) []Chromosome {
 	return bestChromosomes
 }
 
-func displacementMutation(Chromosome Chromosome) Chromosome {
+func displacementMutation(chromosome chromosome) chromosome {
 	//Randomly select number of genes to mutate, but at least 1
 	//numOfGenesToMutate := rand.Intn(maxMutatedGenes) + 1
 	/* 	for i := 0; i < numOfGenesToMutate; i++ {
@@ -262,10 +317,10 @@ func displacementMutation(Chromosome Chromosome) Chromosome {
 	   		Chromosome.tasks[newPosition].taskID = oldTaskID
 	   	}
 	*/
-	return Chromosome
+	return chromosome
 }
 
-func swapMutation(Chromosome Chromosome) Chromosome {
+func swapMutation(chromosome chromosome) chromosome {
 	//Randomly select number of genes to mutate, but at least 1
 	/* 	numOfGenesToMutate := rand.Intn(maxMutatedGenes-1) + 1
 	   	sampleOrder := rand.Perm(len(Chromosome.tasks))
@@ -273,12 +328,12 @@ func swapMutation(Chromosome Chromosome) Chromosome {
 	   		//Swap taskIDs for the task with number sampleOrder[i] and sampleOrder[len(Chromosome.tasks)-1] to make it easier to account for the border values
 	   		Chromosome.tasks[sampleOrder[i]].taskID, Chromosome.tasks[sampleOrder[len(Chromosome.tasks)-i-1]].taskID = Chromosome.tasks[sampleOrder[len(Chromosome.tasks)-i-1]].taskID, Chromosome.tasks[sampleOrder[i]].taskID
 	   	}
-	*/return Chromosome
+	*/return chromosome
 
 }
 
-func mutateChromosomes(Chromosomes []Chromosome) []Chromosome {
-	var mutatedChromosomes []Chromosome
+func mutateChromosomes(chromosomes []chromosome) []chromosome {
+	var mutatedChromosomes []chromosome
 	/* 	//var crossoverStart, crossoverEnd, crossoverLen int
 	   	//Copy parent to child Chromosomes slice
 	   	//mutatedChromosomes = make([]Chromosome, len(Chromosomes))
@@ -296,4 +351,126 @@ func mutateChromosomes(Chromosomes []Chromosome) []Chromosome {
 	   		}
 	   	} */
 	return mutatedChromosomes
+}
+
+func calcChromosomesFitness(chromosomes []chromosome, compHand Hand, userHand Hand) {
+	for i, v := range chromosomes {
+		chromosomes[i].fitness = calcChromosomeFitness(v, compHand, userHand)
+	}
+}
+
+func calcChromosomeFitness(chromosome chromosome, compHand Hand, userHand Hand) float32 {
+	var totalMatches, totalWins, numCards int
+	var winPercentage float32
+	for _, v := range userHand.cards {
+		if v.playable {
+			numCards++
+		}
+	}
+	//Generate temp slice to store card order numbers
+	tempSlice := make([]int, numCards)
+	for i := range tempSlice {
+		tempSlice[i] = i
+	}
+	//Get all possible orders of the cards for the specific amount of cards
+	cardOrders := GetAllPermutations(tempSlice)
+
+	//Get all possible power combinations for numCards
+	maxAvailablePower := userHand.power
+	cardPowers := GetAllPermutationsForSum(numCards, maxAvailablePower)
+	Logger.Debug(compHand.cards)
+	Logger.Debug(userHand.cards)
+	//TODO: Skip incorrect variants of cardOrder, if we know user selected card
+	for _, cardOrder := range cardOrders {
+		Logger.Debug(cardOrder)
+		cardOrder = convertCardOrder(cardOrder, userHand)
+		Logger.Debug(cardOrder)
+		for _, cardPower := range cardPowers {
+			//Logger.Debug(cardPower)
+			totalMatches++
+			compHealth := compHand.health
+			userHealth := userHand.health
+			for i, v := range cardOrder {
+				//Logger.Debug(compHand.cards[chromosome.genes[i].order].value, chromosome.genes[i].power)
+				//Logger.Debug(userHand.cards[v].value, cardPower[i])
+				compAttack := compHand.cards[chromosome.genes[i].order].value * (chromosome.genes[i].power + 1)
+				userAttack := userHand.cards[v].value * (cardPower[i] + 1)
+				if compAttack > userAttack {
+					userHealth -= compHand.cards[chromosome.genes[i].order].damage
+				} else {
+					compHealth -= userHand.cards[v].damage
+				}
+				//Logger.Debug(userHealth, ":", compHealth)
+
+				if userHealth < 1 || compHealth < 1 {
+					break
+				}
+			}
+			if userHealth < 1 || userHealth <= compHealth {
+				totalWins++
+			}
+		}
+	}
+	Logger.Debug(totalMatches)
+	Logger.Debug(totalWins)
+	winPercentage = float32(totalWins) / float32(totalMatches)
+	return winPercentage
+}
+
+//convert relative card order (excluding played) to absolute order in hand
+func convertCardOrder(cardOrder []int, hand Hand) []int {
+	for i, v := range hand.cards {
+		if !v.playable {
+			for j, w := range cardOrder {
+				Logger.Debug(i, v)
+				Logger.Debug(j, w)
+				Logger.Debug(cardOrder)
+				if w >= i {
+					cardOrder[j]++
+					Logger.Debug(cardOrder)
+				}
+			}
+		}
+	}
+	return cardOrder
+}
+
+func sortChromosomes(chromosomes []chromosome) {
+	//Sort chromosomes in the order of fitness (descending) - from largest to smallest
+	sort.Slice(chromosomes, func(i, j int) bool {
+		return chromosomes[i].fitness > chromosomes[j].fitness
+	})
+}
+
+func filterHand(hand Hand) Hand {
+	var newHand Hand
+	//Copying original hand
+	newHand.health = hand.health
+	newHand.power = hand.power
+	newHand.selectedCard = hand.selectedCard
+	newHand.selectedPower = hand.selectedPower
+	for i, v := range hand.cards {
+		if v.playable || i == hand.selectedCard {
+			newHand.cards = append(newHand.cards, v)
+		}
+	}
+	return newHand
+}
+
+//GetNextMove will return card number and power for the next comp move
+func GetNextMove(compHand Hand, userHand Hand) (int, int) {
+	//	var nextCardNumber, nextPower int
+	rand.Seed(time.Now().UnixNano())
+	newCompHand := filterHand(compHand)
+	newUserHand := filterHand(userHand)
+	Logger.Debug(newCompHand)
+	Logger.Debug(newUserHand)
+	population := generatePopulation(compHand)
+	calcChromosomesFitness(population.chromosomes, compHand, userHand)
+	sortChromosomes(population.chromosomes)
+
+	//calcChromosomeFitness(population.chromosomes[0], newCompHand, newUserHand)
+	Logger.Debug(population)
+	Logger.Debug(population.chromosomes[0])
+	return population.chromosomes[0].genes[0].order, population.chromosomes[0].genes[0].power
 }
